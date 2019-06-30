@@ -107,6 +107,10 @@ class ITwibDebugger {
 		GET_NRO_INFOS = 24,
 		SET_HARDWARE_BREAK_POINT_CONTEXTIDR = 25,
 	};
+	struct ThreadToContinue {
+		uint64_t thread_id;
+		bool step;
+	};
 };
 
 class ITwibProcessMonitor {

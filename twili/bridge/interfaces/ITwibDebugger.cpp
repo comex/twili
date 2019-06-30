@@ -100,7 +100,29 @@ void ITwibDebugger::BreakProcess(bridge::ResponseOpener opener) {
 	opener.RespondOk();
 }
 
-void ITwibDebugger::ContinueDebugEvent(bridge::ResponseOpener opener, uint32_t flags, std::vector<uint64_t> thread_ids) {
+void ITwibDebugger::ContinueDebugEvent(bridge::ResponseOpener opener, uint32_t flags, std::vector<ThreadToContinue> threads) {
+	std::vector<uint64_t> thread_ids(threads.size());
+	for(auto &thread : threads) {
+		thread_ids.push_back(thread.thread_id);
+		thread_context_t context = ResultCode::AssertOk(
+			trn::svc::GetDebugThreadContext(debug, thread.thread_id, 2));
+		uint32_t mask = (1 << 21) | (1 << 24);
+		if(thread.step) {
+			context.psr |= mask;
+		} else {
+			context.psr &= ~mask;
+		}
+		printf("setting context.psr=0x%x\n", context.psr);
+		auto res = trn::svc::SetDebugThreadContext(debug, thread.thread_id, &context, 2);
+		// We might get 0xFA01 if the thread is already running.  That's okay
+		// if we weren't trying to step it.
+		if(!(!thread.step && res == tl::make_unexpected(ResultCode(0xFA01)))) {
+			ResultCode::AssertOk(std::move(res));
+		}
+		thread_context_t context2 = ResultCode::AssertOk(
+			trn::svc::GetDebugThreadContext(debug, thread.thread_id, 2));
+		printf("got context.psr=0x%x\n", context2.psr);
+	}
 	// TODO: flags for pre-3.0.0
 	ResultCode::AssertOk(
 		trn::svc::ContinueDebugEvent(debug, flags, thread_ids.data(), thread_ids.size()));

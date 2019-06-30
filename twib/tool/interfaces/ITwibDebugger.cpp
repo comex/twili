@@ -98,11 +98,11 @@ void ITwibDebugger::SetThreadContext(uint64_t thread_id, std::vector<uint64_t> r
 		in<ThreadContext>(tc));
 }
 
-void ITwibDebugger::ContinueDebugEvent(uint32_t flags, std::vector<uint64_t> thread_ids) {
+void ITwibDebugger::ContinueDebugEvent(uint32_t flags, std::vector<ThreadToContinue> threads) {
 	obj->SendSmartSyncRequest(
 		CommandID::CONTINUE_DEBUG_EVENT,
 		in<uint32_t>(flags),
-		in<std::vector<uint64_t>>(thread_ids));
+		in<std::vector<ThreadToContinue>>(threads));
 }
 
 void ITwibDebugger::BreakProcess() {

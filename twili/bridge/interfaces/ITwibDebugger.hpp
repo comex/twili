@@ -44,6 +44,7 @@ class ITwibDebugger : public ObjectDispatcherProxy<ITwibDebugger> {
 	ITwibDebugger(uint32_t object_id, Twili &twili, trn::KDebug &&debug, std::shared_ptr<process::MonitoredProcess> proc);
 
 	using CommandID = protocol::ITwibDebugger::Command;
+	using ThreadToContinue = protocol::ITwibDebugger::ThreadToContinue;
 	
  private:
 	Twili &twili;
@@ -58,7 +59,7 @@ class ITwibDebugger : public ObjectDispatcherProxy<ITwibDebugger> {
 	void GetDebugEvent(bridge::ResponseOpener opener);
 	void GetThreadContext(bridge::ResponseOpener opener, uint64_t thread_id);
 	void BreakProcess(bridge::ResponseOpener opener);
-	void ContinueDebugEvent(bridge::ResponseOpener opener, uint32_t flags, std::vector<uint64_t> thread_ids);
+	void ContinueDebugEvent(bridge::ResponseOpener opener, uint32_t flags, std::vector<ThreadToContinue> thread_ids);
 	void SetThreadContext(bridge::ResponseOpener opener, uint64_t thread_id, uint32_t flags, thread_context_t context);
 	void GetNsoInfos(bridge::ResponseOpener opener);
 	void WaitEvent(bridge::ResponseOpener opener);

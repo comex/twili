@@ -712,7 +712,8 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 	struct Action {
 		enum class Type {
 			Invalid,
-			Continue
+			Continue,
+			Step
 		} type = Type::Invalid;
 	};
 
@@ -734,6 +735,12 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 				// fall-through
 			case 'c':
 				action.type = Action::Type::Continue;
+				break;
+			case 'S':
+				LogMessage(Warning, "vCont 'S' action not well supported");
+				// fall-through
+			case 's':
+				action.type = Action::Type::Step;
 				break;
 			default:
 				LogMessage(Warning, "unsupported vCont action: %c", ch);
@@ -808,11 +815,14 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 				LogMessage(Warning, "no such thread: 0x%lx", t.first);
 				continue;
 			}
-			proc.running_thread_ids.push_back(t.first);
+			bool step = t.second.type == Action::Type::Step;
+			proc.running_thread_ids.push_back(ITwibDebugger::ThreadToContinue {
+				t.first, step
+			});
 		}
 		LogMessage(Debug, "continuing process");
 		for(auto &t : proc.running_thread_ids) {
-			LogMessage(Debug, "  tid 0x%lx", t);
+			LogMessage(Debug, "  tid 0x%lx", t.thread_id);
 		}
 		proc.debugger.ContinueDebugEvent(7, proc.running_thread_ids);
 		proc.running = true;
@@ -1128,7 +1138,9 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 		case nx::DebugEvent::EventType::AttachThread: {
 			thread_id = event->attach_thread.thread_id;
 			LogMessage(Debug, "  attaching new thread: 0x%x", thread_id);
-			running_thread_ids.push_back(thread_id); // autocontinue
+			running_thread_ids.push_back(ITwibDebugger::ThreadToContinue {
+				thread_id, false
+			}); // autocontinue
 			auto r = threads.emplace(thread_id, Thread(*this, thread_id, event->attach_thread.tls_pointer));
 
 			stub.get_thread_info.valid = false;
@@ -1155,10 +1167,12 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 				}
 				threads.erase(i);
 				running_thread_ids.erase(
-					std::remove(
+					std::remove_if(
 						running_thread_ids.begin(),
 						running_thread_ids.end(),
-						thread_id), running_thread_ids.end());
+						[&](const ITwibDebugger::ThreadToContinue &t) {
+							return t.thread_id == thread_id;
+						}), running_thread_ids.end());
 				stub.get_thread_info.valid = false;
 			} else {
 				LogMessage(Warning, "  no such thread 0x%x", thread_id);

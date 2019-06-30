@@ -90,7 +90,7 @@ class GdbStub {
 		uint64_t pid;
 		ITwibDebugger debugger;
 		std::map<uint64_t, Thread> threads;
-		std::vector<uint64_t> running_thread_ids;
+		std::vector<ITwibDebugger::ThreadToContinue> running_thread_ids;
 		std::shared_ptr<std::atomic<bool>> has_events;
 		bool running = false;
 	};

@@ -36,6 +36,7 @@ class ITwibDebugger {
 	ITwibDebugger(std::shared_ptr<RemoteObject> obj);
 
 	using CommandID = protocol::ITwibDebugger::Command;
+	using ThreadToContinue = protocol::ITwibDebugger::ThreadToContinue;
 
 	std::tuple<nx::MemoryInfo, nx::PageInfo> QueryMemory(uint64_t addr);
 	std::vector<uint8_t> ReadMemory(uint64_t addr, uint64_t size);
@@ -43,7 +44,7 @@ class ITwibDebugger {
 	std::optional<nx::DebugEvent> GetDebugEvent();
 	std::vector<uint64_t> GetThreadContext(uint64_t thread_id);
 	void SetThreadContext(uint64_t thread_id, std::vector<uint64_t> registeres);
-	void ContinueDebugEvent(uint32_t flags, std::vector<uint64_t> thread_ids);
+	void ContinueDebugEvent(uint32_t flags, std::vector<ThreadToContinue> threads);
 	void BreakProcess();
 	void AsyncWait(std::function<void(uint32_t)> &&cb);
 	uint64_t GetTargetEntry();
