@@ -55,6 +55,7 @@ class ITwibDeviceInterface : public ObjectDispatcherProxy<ITwibDeviceInterface> 
 	void OpenFilesystemAccessor(bridge::ResponseOpener opener, std::string fs);
 	void WaitToDebugApplication(bridge::ResponseOpener opener);
 	void WaitToDebugTitle(bridge::ResponseOpener opener, uint64_t tid);
+	void SetHardwareBreakPoint(bridge::ResponseOpener opener, uint32_t hardware_breakpoint_id, uint32_t cr, uint64_t vr_or_pid);
 
  public:
 	SmartRequestDispatcher<
@@ -74,7 +75,8 @@ class ITwibDeviceInterface : public ObjectDispatcherProxy<ITwibDeviceInterface> 
 		SmartCommand<CommandID::LAUNCH_UNMONITORED_PROCESS, &ITwibDeviceInterface::LaunchUnmonitoredProcess>,
 		SmartCommand<CommandID::OPEN_FILESYSTEM_ACCESSOR, &ITwibDeviceInterface::OpenFilesystemAccessor>,
 		SmartCommand<CommandID::WAIT_TO_DEBUG_APPLICATION, &ITwibDeviceInterface::WaitToDebugApplication>,
-		SmartCommand<CommandID::WAIT_TO_DEBUG_TITLE, &ITwibDeviceInterface::WaitToDebugTitle>
+		SmartCommand<CommandID::WAIT_TO_DEBUG_TITLE, &ITwibDeviceInterface::WaitToDebugTitle>,
+		SmartCommand<CommandID::SET_HARDWARE_BREAK_POINT, &ITwibDeviceInterface::SetHardwareBreakPoint>
 		> dispatcher;
 
 	trn::KEvent ev_debug_application;

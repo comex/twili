@@ -205,5 +205,12 @@ void ITwibDebugger::GetNroInfos(bridge::ResponseOpener opener) {
 	opener.RespondOk(std::move(nro_info));
 }
 
+void ITwibDebugger::SetHardwareBreakPointContextIDR(bridge::ResponseOpener opener, uint32_t hardware_breakpoint_id, uint32_t cr) {
+	// For ContextIDR breakpoints, the kernel wants a debug handle instead of a value.
+	ResultCode::AssertOk(
+		trn::svc::SetHardwareBreakPoint(hardware_breakpoint_id, cr, debug));
+	opener.RespondOk();
+}
+
 } // namespace bridge
 } // namespace twili

@@ -370,5 +370,13 @@ void ITwibDeviceInterface::WaitToDebugTitle(bridge::ResponseOpener opener, uint6
 		});
 }
 
+void ITwibDeviceInterface::SetHardwareBreakPoint(bridge::ResponseOpener opener, uint32_t hardware_breakpoint_id, uint32_t cr, uint64_t vr) {
+	// Used for everything other than ContextIDR breakpoints, where the kernel
+	// takes the DBG<x>VR value directly.
+	ResultCode::AssertOk(
+		trn::svc::SetHardwareBreakPoint(hardware_breakpoint_id, cr, vr));
+	opener.RespondOk();
+}
+
 } // namespace bridge
 } // namespace twili

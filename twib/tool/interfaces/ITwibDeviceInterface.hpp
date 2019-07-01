@@ -66,6 +66,7 @@ class ITwibDeviceInterface {
 	void AsyncWaitToDebugTitle(uint64_t tid, std::function<void(uint32_t, uint64_t)> &&cb);
 	uint64_t WaitToDebugApplication();
 	uint64_t WaitToDebugTitle(uint64_t tid);
+	void SetHardwareBreakPoint(uint32_t hardware_breakpoint_id, uint32_t cr, uint64_t vr);
  private:
 	std::shared_ptr<RemoteObject> obj;
 };

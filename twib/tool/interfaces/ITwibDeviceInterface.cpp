@@ -175,6 +175,15 @@ uint64_t ITwibDeviceInterface::WaitToDebugTitle(uint64_t tid) {
 	return pid;
 }
 
+void ITwibDeviceInterface::SetHardwareBreakPoint(uint32_t hardware_breakpoint_id, uint32_t cr, uint64_t vr) {
+	obj->SendSmartSyncRequest(
+		CommandID::SET_HARDWARE_BREAK_POINT,
+		in<uint32_t>(hardware_breakpoint_id),
+		in<uint32_t>(cr),
+		in<uint64_t>(vr));
+
+}
+
 } // namespace tool
 } // namespace twib
 } // namespace twili

@@ -94,6 +94,40 @@ class GdbStub {
 		std::shared_ptr<std::atomic<bool>> has_events;
 		bool running = false;
 	};
+
+	// breakpoint or watchpoint
+	class HWBreakpoint {
+	 public:
+		bool ValidateAndComputeRegs();
+		const char *TypeStr() const;
+		bool HasLinkedContextIDBreakpoint() const;
+		bool Matches(const HWBreakpoint &) const;
+		void SetTo(const HWBreakpoint &);
+
+		int8_t id = -1; // breakpoints: 0-5; watchpoints: 0x10-0x13
+
+		enum class Type {
+			Disabled,
+			Break,
+			WatchR,
+			WatchW,
+			WatchRW,
+			ContextID,
+		} type = Type::Disabled;
+
+		uint64_t pid = 0;
+
+		// for everything other than ContextID:
+		uint64_t address = 0;
+		uint64_t size = 0;
+		int8_t linked_contextid_bp_id = -1;
+		// for ContextID:
+		int8_t refcount = 0;
+
+		// calculated:
+		uint32_t cr = 0;
+		uint64_t vr = 0;
+	};
 	
 	Thread *current_thread = nullptr;
 	std::map<uint64_t, Process> attached_processes;
@@ -135,6 +169,11 @@ class GdbStub {
 		std::map<uint64_t, Thread>::iterator thread_iterator;
 	} get_thread_info;
 
+	enum class BreakpointCommand {
+		Set,
+		Clear,
+	};
+
 	// utilities
 	void ReadThreadId(util::Buffer &buffer, int64_t &pid, int64_t &thread_id);
 	
@@ -150,6 +189,7 @@ class GdbStub {
 	void HandleSetCurrentThread(util::Buffer &packet);
 	void HandleReadMemory(util::Buffer &packet);
 	void HandleWriteMemory(util::Buffer &packet);
+	void HandleBreakpointCommand(util::Buffer &packet, BreakpointCommand command);
 	
 	// multiletter packets
 	void HandleVAttach(util::Buffer &packet);
@@ -173,7 +213,22 @@ class GdbStub {
 	// xfer objects
 	std::string XferReadLibraries();
 	ReadOnlyStringXferObject xfer_libraries;
-	
+
+	// hardware breakpoints/watchpoints
+	void InitBreakpointRegs();
+	void ClearBreakpointRegs(std::optional<uint64_t> pid = std::nullopt);
+	void ClearBreakpointRegsIn(std::vector<HWBreakpoint> &bps, std::optional<uint64_t> pid);
+	void HandleSetBreakpoint(HWBreakpoint &match);
+	void HandleClearBreakpoint(const HWBreakpoint &match);
+	std::vector<HWBreakpoint> &BreakpointRegsForType(HWBreakpoint::Type type);
+	std::optional<HWBreakpoint *> FindOrSetBreakpoint(const HWBreakpoint &match);
+	void CheckContextIDRefcount(HWBreakpoint &bw);
+	void InstallBreakpoint(HWBreakpoint &bw);
+
+	std::vector<HWBreakpoint> break_bps; // corresponds to DBGBCR0..3
+	std::vector<HWBreakpoint> contextid_bps;  // corresponds to DBGBCR4..5
+	std::vector<HWBreakpoint> watch_bps; // corresponds to DBGWCR0..3
+
 	bool thread_events_enabled = false;
 };
 

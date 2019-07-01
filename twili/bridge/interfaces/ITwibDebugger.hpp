@@ -65,6 +65,7 @@ class ITwibDebugger : public ObjectDispatcherProxy<ITwibDebugger> {
 	void GetTargetEntry(bridge::ResponseOpener opener);
 	void LaunchDebugProcess(bridge::ResponseOpener opener);
 	void GetNroInfos(bridge::ResponseOpener opener);
+	void SetHardwareBreakPointContextIDR(bridge::ResponseOpener opener, uint32_t hardware_breakpoint_id, uint32_t cr);
 
  public:
 	SmartRequestDispatcher<
@@ -82,7 +83,8 @@ class ITwibDebugger : public ObjectDispatcherProxy<ITwibDebugger> {
 		SmartCommand<CommandID::WAIT_EVENT, &ITwibDebugger::WaitEvent>,
 		SmartCommand<CommandID::GET_TARGET_ENTRY, &ITwibDebugger::GetTargetEntry>,
 		SmartCommand<CommandID::LAUNCH_DEBUG_PROCESS, &ITwibDebugger::LaunchDebugProcess>,
-		SmartCommand<CommandID::GET_NRO_INFOS, &ITwibDebugger::GetNroInfos>
+		SmartCommand<CommandID::GET_NRO_INFOS, &ITwibDebugger::GetNroInfos>,
+		SmartCommand<CommandID::SET_HARDWARE_BREAK_POINT_CONTEXTIDR, &ITwibDebugger::SetHardwareBreakPointContextIDR>
 		> dispatcher;
 };
 

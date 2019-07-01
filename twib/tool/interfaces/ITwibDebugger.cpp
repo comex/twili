@@ -144,6 +144,13 @@ std::vector<nx::LoadedModuleInfo> ITwibDebugger::GetNroInfos() {
 	return infos;
 }
 
+void ITwibDebugger::SetHardwareBreakPointContextIDR(uint32_t hardware_breakpoint_id, uint32_t cr) {
+	obj->SendSmartSyncRequest(
+		CommandID::SET_HARDWARE_BREAK_POINT_CONTEXTIDR,
+		in(hardware_breakpoint_id),
+		in(cr));
+}
+
 } // namespace tool
 } // namespace twib
 } // namespace twili

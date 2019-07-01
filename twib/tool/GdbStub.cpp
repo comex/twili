@@ -52,9 +52,11 @@ GdbStub::GdbStub(ITwibDeviceInterface &itdi) :
 	AddMultiletterHandler("Cont?", &GdbStub::HandleVContQuery);
 	AddMultiletterHandler("Cont", &GdbStub::HandleVCont);
 	AddXferObject("libraries", xfer_libraries);
+	InitBreakpointRegs();
 }
 
 GdbStub::~GdbStub() {
+	ClearBreakpointRegs();
 	loop.Destroy();
 }
 
@@ -225,11 +227,13 @@ void GdbStub::HandleDetach(util::Buffer &packet) {
 		}
 		get_thread_info.valid = false;
 		attached_processes.erase(pid);
+		ClearBreakpointRegs(pid);
 	} else { // detach all
 		LogMessage(Debug, "detaching from all");
 		current_thread = nullptr;
 		get_thread_info.valid = false;
 		attached_processes.clear();
+		ClearBreakpointRegs();
 	}
 	stop_reason = "W00";
 	connection.RespondOk();
@@ -386,6 +390,272 @@ void GdbStub::HandleWriteMemory(util::Buffer &packet) {
 	} catch(ResultError &e) {
 		connection.RespondError(e.code);
 	}
+}
+
+void GdbStub::InitBreakpointRegs() {
+	HWBreakpoint bp;
+	for(int i = 0; i < 4; i++) {
+		bp.id = i;
+		InstallBreakpoint(bp);
+		break_bps.push_back(bp);
+	}
+	for(int i = 0; i < 2; i++) {
+		bp.id = 4 + i;
+		InstallBreakpoint(bp);
+		contextid_bps.push_back(bp);
+	}
+	for(int i = 0; i < 4; i++) {
+		bp.id = 0x10 + i;
+		InstallBreakpoint(bp);
+		watch_bps.push_back(bp);
+	}
+}
+
+void GdbStub::ClearBreakpointRegs(std::optional<uint64_t> pid) {
+	ClearBreakpointRegsIn(break_bps, pid);
+	ClearBreakpointRegsIn(watch_bps, pid);
+	ClearBreakpointRegsIn(contextid_bps, pid);
+}
+
+void GdbStub::ClearBreakpointRegsIn(std::vector<HWBreakpoint> &bps, std::optional<uint64_t> pid) {
+	for (HWBreakpoint &bp : bps) {
+		if (!pid.has_value() || bp.pid == *pid) {
+			bp.type = HWBreakpoint::Type::Disabled;
+			InstallBreakpoint(bp);
+		}
+	}
+}
+
+void GdbStub::HandleBreakpointCommand(util::Buffer &packet, BreakpointCommand command) {
+	uint64_t type_raw;
+	HWBreakpoint match;
+	GdbConnection::DecodeWithSeparator(type_raw, ',', packet);
+	GdbConnection::DecodeWithSeparator(match.address, ',', packet);
+	GdbConnection::DecodeWithSeparator(match.size, ';', packet);
+
+	if(packet.ReadAvailable()) {
+		// gdb tried to send stub-side conditions or commands; not supported
+		connection.RespondError(1);
+	}
+
+	if (!current_thread) {
+		LogMessage(Warning, "attempted breakpoint command without selected thread");
+		connection.RespondError(1);
+		return;
+	}
+	match.pid = current_thread->process.pid;
+
+	switch(type_raw) {
+	case 1:
+		match.type = HWBreakpoint::Type::Break;
+		break;
+	case 2:
+		match.type = HWBreakpoint::Type::WatchW;
+		break;
+	case 3:
+		match.type = HWBreakpoint::Type::WatchR;
+		break;
+	case 4:
+		match.type = HWBreakpoint::Type::WatchRW;
+		break;
+	case 0: // software breakpoint
+	default:
+		// "A remote target shall return an empty string for an unrecognized
+		// breakpoint or watchpoint packet type."
+		connection.RespondEmpty();
+		return;
+	}
+
+	switch (command) {
+	case BreakpointCommand::Clear:
+		HandleClearBreakpoint(match);
+		return;
+	case BreakpointCommand::Set:
+		HandleSetBreakpoint(match);
+		return;
+	}
+}
+
+void GdbStub::HandleSetBreakpoint(HWBreakpoint &match) {
+	HWBreakpoint match_context_id_bp;
+	match_context_id_bp.type = HWBreakpoint::Type::ContextID;
+	match_context_id_bp.pid = match.pid;
+
+	std::optional<HWBreakpoint *> context_id_bp = FindOrSetBreakpoint(match_context_id_bp);
+	if (!context_id_bp) {
+		LogMessage(Error, "Cannot set %s: out of slots for context ID breakpoint", match.TypeStr());
+		connection.RespondError(1);
+		return;
+	}
+
+	match.linked_contextid_bp_id = (*context_id_bp)->id;
+
+	if (!match.ValidateAndComputeRegs()) {
+		LogMessage(Error, "Cannot set %s: invalid address/size (0x%llx, 0x%llx)",
+			match.TypeStr(), (long long)match.address, (long long)match.size);
+		connection.RespondError(1);
+	} else if (!FindOrSetBreakpoint(match)) {
+		LogMessage(Error, "Cannot set %s: out of slots", match.TypeStr());
+		connection.RespondError(1);
+	} else {
+		connection.RespondOk();
+	}
+
+	CheckContextIDRefcount(**context_id_bp);
+}
+
+void GdbStub::HandleClearBreakpoint(const HWBreakpoint &match) {
+	for(HWBreakpoint &bw : BreakpointRegsForType(match.type)) {
+		if(bw.Matches(match)) {
+			if(bw.HasLinkedContextIDBreakpoint()) {
+				HWBreakpoint &link = contextid_bps[bw.linked_contextid_bp_id - 4];
+				link.refcount--;
+				CheckContextIDRefcount(link);
+			}
+			bw.type = HWBreakpoint::Type::Disabled;
+			InstallBreakpoint(bw);
+		}
+	}
+	connection.RespondOk();
+}
+
+std::vector<GdbStub::HWBreakpoint> &GdbStub::BreakpointRegsForType(HWBreakpoint::Type type) {
+	switch (type) {
+	case HWBreakpoint::Type::Break:
+		return break_bps;
+	case HWBreakpoint::Type::WatchR:
+	case HWBreakpoint::Type::WatchW:
+	case HWBreakpoint::Type::WatchRW:
+		return watch_bps;
+	case HWBreakpoint::Type::ContextID:
+		return contextid_bps;
+	case HWBreakpoint::Type::Disabled:
+		throw std::runtime_error("BreakpointRegsForType: invalid type");
+	}
+}
+
+std::optional<GdbStub::HWBreakpoint *> GdbStub::FindOrSetBreakpoint(const HWBreakpoint &match) {
+	std::vector<HWBreakpoint> &regs = BreakpointRegsForType(match.type);
+	for(HWBreakpoint &bw : regs) {
+		if(bw.Matches(match)) {
+			return &bw;
+		}
+	}
+	for(HWBreakpoint &bw : regs) {
+		if (bw.type == HWBreakpoint::Type::Disabled) {
+			bw.SetTo(match);
+			InstallBreakpoint(bw);
+			if(match.HasLinkedContextIDBreakpoint()) {
+				contextid_bps[match.linked_contextid_bp_id - 4].refcount++;
+			}
+			return &bw;
+		}
+	}
+	return std::nullopt;
+}
+
+void GdbStub::CheckContextIDRefcount(HWBreakpoint &bw) {
+	if(bw.refcount == 0) {
+		bw.type = HWBreakpoint::Type::Disabled;
+		InstallBreakpoint(bw);
+	}
+}
+
+void GdbStub::InstallBreakpoint(HWBreakpoint &bw) {
+	if (!bw.ValidateAndComputeRegs()) {
+		throw std::runtime_error("InstallBreakpoint: invalid breakpoint");
+	}
+	if(bw.type != HWBreakpoint::Type::ContextID) {
+		itdi.SetHardwareBreakPoint(bw.id, bw.cr, bw.vr);
+	} else {
+		auto p = attached_processes.find(bw.pid);
+		if (p == attached_processes.end()) {
+			throw std::runtime_error("InstallBreakpoint: no such pid");
+		}
+		p->second.debugger.SetHardwareBreakPointContextIDR(bw.id, bw.cr);
+	}
+}
+
+bool GdbStub::HWBreakpoint::ValidateAndComputeRegs() {
+	switch(type) {
+	case Type::Disabled:
+		vr = 0;
+		cr = 0;
+		return true;
+
+	case Type::Break: {
+		if(size != 4 || (address & 3) || linked_contextid_bp_id < 4) {
+			return false;
+		}
+		vr = address;
+		uint32_t bt = 1; // type = linked instruction address match
+		uint32_t lbn = (uint32_t)linked_contextid_bp_id;
+		uint32_t bas = 0xf;
+		uint32_t e = 1; // enabled
+		cr = bt << 20 | lbn << 16 | bas << 5 | e << 0;
+		return true;
+	}
+
+	case Type::WatchR:
+	case Type::WatchW:
+	case Type::WatchRW: {
+		if(size <= 8) {
+			// Any size <= 8 can be implemented with the BAS field as long as
+			// the start and end are within the same u64.
+			if((address & 7) + size > 8) {
+				return false;
+			}
+			vr = address & ~7;
+			uint32_t bas = ((1 << size) - 1) << (address & 7);
+			cr = bas << 5;
+		} else if (size <= 0x80000000) {
+			// Larger watches up to 2GB can be implemented with MASK if the
+			// size is a power of 2 and the address is aligned to that size.
+			if((size & (size - 1)) != 0 ||
+				(address & (size - 1)) != 0) {
+				return false;
+			}
+			uint32_t mask = 0;
+			for(uint64_t test = 1; test != size; test *= 2) {
+				mask++;
+			}
+			cr = mask << 24;
+		}
+		uint32_t lsc =
+			(type != Type::WatchW ? 1 : 0) | // load
+			(type != Type::WatchR ? 2 : 0); // store
+		uint32_t e = 1; // enabled
+		cr |= lsc << 3 | e << 0;
+		return true;
+	}
+
+	case Type::ContextID: {
+		uint32_t bt = 3; // type = linked ContextID match
+		uint32_t bas = 0xf;
+		uint32_t e = 1; // enabled
+		cr = bt << 20 | bas << 5 | e << 0;
+		return true;
+	}
+	}
+}
+
+const char *GdbStub::HWBreakpoint::TypeStr() const {
+	return type == Type::Break ? "hardware breakpoint" : "watchpoint";
+}
+
+bool GdbStub::HWBreakpoint::HasLinkedContextIDBreakpoint() const {
+	return type != Type::Disabled && type != Type::ContextID;
+}
+
+bool GdbStub::HWBreakpoint::Matches(const HWBreakpoint &other) const {
+	return type == other.type && pid == other.pid &&
+		address == other.address && size == other.size;
+}
+
+void GdbStub::HWBreakpoint::SetTo(const HWBreakpoint &other) {
+	int8_t my_id = id;
+	*this = other;
+	id = my_id;
 }
 
 void GdbStub::HandleVAttach(util::Buffer &packet) {
@@ -1012,8 +1282,8 @@ std::string GdbStub::Process::BuildLibraryList() {
 	std::vector<nx::LoadedModuleInfo> nsos = debugger.GetNsoInfos();
 	for(size_t i = 0; i < nsos.size(); i++) {
 		// skip main
-		if(nsos.size() == 1) { continue; } // standalone main
-		if(nsos.size() >= 2 && i == 1) { continue; } // rtld, main, subsdks, etc.
+		//if(nsos.size() == 1) { continue; } // standalone main
+		//if(nsos.size() >= 2 && i == 1) { continue; } // rtld, main, subsdks, etc.
 
 		nx::LoadedModuleInfo &info = nsos[i];
 		
@@ -1115,6 +1385,12 @@ void GdbStub::Logic::Prepare(platform::EventLoop &loop) {
 			break;
 		case 'v': // variable
 			stub.HandleMultiletterPacket(*buffer);
+			break;
+		case 'Z': // set breakpoint
+			stub.HandleBreakpointCommand(*buffer, BreakpointCommand::Set);
+			break;
+		case 'z': // clear breakpoint
+			stub.HandleBreakpointCommand(*buffer, BreakpointCommand::Clear);
 			break;
 		default:
 			LogMessage(Info, "unrecognized packet: %c", ident);

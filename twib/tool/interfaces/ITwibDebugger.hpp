@@ -50,6 +50,7 @@ class ITwibDebugger {
 	void LaunchDebugProcess();
 	std::vector<nx::LoadedModuleInfo> GetNsoInfos();
 	std::vector<nx::LoadedModuleInfo> GetNroInfos();
+	void SetHardwareBreakPointContextIDR(uint32_t hardware_breakpoint_id, uint32_t cr);
  private:
 	std::shared_ptr<RemoteObject> obj;
 };
