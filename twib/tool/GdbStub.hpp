@@ -22,6 +22,7 @@
 
 #include<optional>
 #include<unordered_map>
+#include<atomic>
 
 #include "GdbConnection.hpp"
 #include "interfaces/ITwibDeviceInterface.hpp"
@@ -90,7 +91,7 @@ class GdbStub {
 		ITwibDebugger debugger;
 		std::map<uint64_t, Thread> threads;
 		std::vector<uint64_t> running_thread_ids;
-		std::shared_ptr<bool> has_events;
+		std::shared_ptr<std::atomic<bool>> has_events;
 		bool running = false;
 	};
 	

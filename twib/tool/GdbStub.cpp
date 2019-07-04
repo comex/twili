@@ -981,7 +981,7 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 	}
 
 	if(!stub.has_async_wait) {
-		std::shared_ptr<bool> has_events = this->has_events;
+		std::shared_ptr<std::atomic<bool>> has_events = this->has_events;
 		debugger.AsyncWait(
 			[has_events, &stub](uint32_t r) {
 				stub.has_async_wait = false;
@@ -1060,7 +1060,7 @@ void GdbStub::Thread::SetRegisters(std::vector<uint64_t> registers) {
 }
 
 GdbStub::Process::Process(uint64_t pid, ITwibDebugger debugger) : pid(pid), debugger(debugger) {
-	has_events = std::make_shared<bool>(false);
+	has_events = std::make_shared<std::atomic<bool>>(false);
 }
 
 GdbStub::Logic::Logic(GdbStub &stub) : stub(stub) {
