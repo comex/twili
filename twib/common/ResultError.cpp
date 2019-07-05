@@ -19,6 +19,7 @@
 //
 
 #include "ResultError.hpp"
+#include "Logger.hpp"
 
 #include<sstream>
 
@@ -29,6 +30,7 @@ ResultError::ResultError(uint32_t code) : std::runtime_error("failed to format r
 	std::ostringstream ss;
 	ss << "ResultError: 0x" << std::hex << code;
 	description = ss.str();
+	LogMessage(Info, "ResultError::ResultError(0x%x)", code);
 }
 
 const char *ResultError::what() const noexcept {

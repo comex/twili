@@ -267,7 +267,11 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 
 	// write VMAs
 	std::vector<uint8_t> transfer_buffer(r.GetMaxTransferSize(), 0);
-	for(auto i = vmas.begin(); i != vmas.end(); i++) {
+	size_t vma_idx = 0;
+	for(auto i = vmas.begin(); i != vmas.end(); i++, vma_idx++) {
+		printf("  transferring VMA %lu/%lu @ 0x%lx size: 0x%lu\n",
+			vma_idx, vmas.size(),
+			i->virtual_addr, i->size);
 		for(size_t offset = 0; offset < i->size; offset+= transfer_buffer.size()) {
 			size_t size = transfer_buffer.size();
 			if(size > i->size - offset) {
@@ -277,7 +281,9 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 			r.Write(transfer_buffer.data(), size);
 		}
 	}
-			
+
+	printf("  finished transferring VMAs\n");
+
 	// write notes
 	std::vector<uint8_t> notes_bytes;
 	for(auto i = notes.begin(); i != notes.end(); i++) {
