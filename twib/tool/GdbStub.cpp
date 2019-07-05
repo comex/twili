@@ -1123,6 +1123,7 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 	int signal = 0;
 	uint64_t thread_id = 0;
 	util::Buffer stop_info;
+	std::optional<uint64_t> watchpoint_hit_addr = std::nullopt;
 	bool stopped = false;
 	
 	while(!stopped && (event = debugger.GetDebugEvent())) {
@@ -1211,6 +1212,9 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 			case nx::DebugEvent::ExceptionType::BreakPoint:
 				LogMessage(Warning, "breakpoint");
 				signal = 5; // SIGTRAP
+				if(event->exception.breakpoint.is_watchpoint) {
+					watchpoint_hit_addr = event->exception.fault_register;
+				}
 				break;
 			case nx::DebugEvent::ExceptionType::UserBreak:
 				LogMessage(Warning, "user break");
@@ -1244,6 +1248,11 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 				GdbConnection::Encode(pid, 0, stop_reason);
 				stop_reason.Write('.');
 				GdbConnection::Encode(thread_id, 0, stop_reason);
+				stop_reason.Write(';');
+			}
+			if(watchpoint_hit_addr) {
+				stop_reason.Write("watch:");
+				GdbConnection::Encode(*watchpoint_hit_addr, 8, stop_reason);
 				stop_reason.Write(';');
 			}
 		} else if(style == 'W') { // process exit
