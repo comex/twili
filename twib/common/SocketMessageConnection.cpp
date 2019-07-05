@@ -44,7 +44,8 @@ bool SocketMessageConnection::ConnectionMember::WantsWrite() {
 
 void SocketMessageConnection::ConnectionMember::SignalRead() {
 	std::tuple<uint8_t*, size_t> target = connection.in_buffer.Reserve(8192);
-	ssize_t r = socket.Recv(std::get<0>(target), std::get<1>(target), 0);
+	size_t to_recv = std::min(std::get<1>(target), (size_t)1048576);
+	ssize_t r = socket.Recv(std::get<0>(target), to_recv, 0);
 	if(r <= 0) {
 		connection.error_flag = true;
 	} else {
@@ -56,7 +57,8 @@ void SocketMessageConnection::ConnectionMember::SignalWrite() {
 	LogMessage(Debug, "pumping out 0x%lx bytes", connection.out_buffer.ReadAvailable());
 	std::lock_guard<Semaphore> lock(connection.out_buffer_sema);
 	if(connection.out_buffer.ReadAvailable() > 0) {
-		ssize_t r = socket.Send(connection.out_buffer.Read(), connection.out_buffer.ReadAvailable(), 0);
+		size_t to_send = std::min(connection.out_buffer.ReadAvailable(), (size_t)1048576);
+		ssize_t r = socket.Send(connection.out_buffer.Read(), to_send, 0);
 		if(r < 0) {
 			connection.error_flag = true;
 			return;
