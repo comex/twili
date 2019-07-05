@@ -39,6 +39,7 @@ class ITwibDebugger {
 	using ThreadToContinue = protocol::ITwibDebugger::ThreadToContinue;
 
 	std::tuple<nx::MemoryInfo, nx::PageInfo> QueryMemory(uint64_t addr);
+	std::vector<nx::MemoryInfo> QueryAllMemory();
 	std::vector<uint8_t> ReadMemory(uint64_t addr, uint64_t size);
 	void WriteMemory(uint64_t addr, std::vector<uint8_t> &bytes);
 	std::optional<nx::DebugEvent> GetDebugEvent();

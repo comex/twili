@@ -53,6 +53,7 @@ class ITwibDebugger : public ObjectDispatcherProxy<ITwibDebugger> {
 	std::shared_ptr<process::MonitoredProcess> proc;
 	
 	void QueryMemory(bridge::ResponseOpener opener, uint64_t address);
+	void QueryAllMemory(bridge::ResponseOpener opener);
 	void ReadMemory(bridge::ResponseOpener opener, uint64_t address, uint64_t size);
 	void WriteMemory(bridge::ResponseOpener opener, uint64_t address, InputStream &data);
 	void ListThreads(bridge::ResponseOpener opener);
@@ -72,6 +73,7 @@ class ITwibDebugger : public ObjectDispatcherProxy<ITwibDebugger> {
 	SmartRequestDispatcher<
 		ITwibDebugger,
 		SmartCommand<CommandID::QUERY_MEMORY, &ITwibDebugger::QueryMemory>,
+		SmartCommand<CommandID::QUERY_ALL_MEMORY, &ITwibDebugger::QueryAllMemory>,
 		SmartCommand<CommandID::READ_MEMORY, &ITwibDebugger::ReadMemory>,
 		SmartCommand<CommandID::WRITE_MEMORY, &ITwibDebugger::WriteMemory>,
 		SmartCommand<CommandID::LIST_THREADS, &ITwibDebugger::ListThreads>,

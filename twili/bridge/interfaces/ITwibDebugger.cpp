@@ -46,6 +46,19 @@ void ITwibDebugger::QueryMemory(bridge::ResponseOpener opener, uint64_t addr) {
 		std::move(std::get<1>(info)));
 }
 
+void ITwibDebugger::QueryAllMemory(bridge::ResponseOpener opener) {
+	std::vector<memory_info_t> mis;
+	uint64_t vaddr = 0;
+	do {
+		std::tuple<memory_info_t, uint32_t> r = ResultCode::AssertOk(
+			trn::svc::QueryDebugProcessMemory(debug, vaddr));
+		memory_info_t mi = std::get<0>(r);
+		mis.push_back(mi);
+		vaddr = ((uint64_t) mi.base_addr) + mi.size;
+	} while(vaddr > 0);
+	opener.RespondOk(std::move(mis));
+}
+
 void ITwibDebugger::ReadMemory(bridge::ResponseOpener opener, uint64_t addr, uint64_t size) {
 	std::vector<uint8_t> buffer(size);
 	ResultCode::AssertOk(

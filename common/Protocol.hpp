@@ -92,6 +92,7 @@ class ITwibDebugger {
  public:
 	enum class Command : uint32_t {
 		QUERY_MEMORY = 10,
+		QUERY_ALL_MEMORY = 26,
 		READ_MEMORY = 11,
 		WRITE_MEMORY = 12,
 		LIST_THREADS = 13,

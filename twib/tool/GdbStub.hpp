@@ -65,9 +65,11 @@ class GdbStub {
 		virtual void Read(std::string annex, size_t offset, size_t length) override;
 		virtual void Write(std::string annex, size_t offset, util::Buffer &data) override;
 		virtual bool AdvertiseRead() override;
+		void InvalidateCache();
 	 private:
 		GdbStub &stub;
 		std::string (GdbStub::*const generator)();
+		std::optional<std::string> cache;
 	};
 
 	class Process;
@@ -87,6 +89,7 @@ class GdbStub {
 		Process(uint64_t pid, ITwibDebugger debugger);
 		bool IngestEvents(GdbStub &stub); // returns whether process is stopped
 		std::string BuildLibraryList();
+		std::string BuildMemoryMap();
 		uint64_t pid;
 		ITwibDebugger debugger;
 		std::map<uint64_t, Thread> threads;
@@ -213,6 +216,8 @@ class GdbStub {
 	// xfer objects
 	std::string XferReadLibraries();
 	ReadOnlyStringXferObject xfer_libraries;
+	std::string XferReadMemoryMap();
+	ReadOnlyStringXferObject xfer_memory_map;
 
 	// hardware breakpoints/watchpoints
 	void InitBreakpointRegs();

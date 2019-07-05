@@ -37,7 +37,8 @@ GdbStub::GdbStub(ITwibDeviceInterface &itdi) :
 		platform::File(STDOUT_FILENO, false)),
 	logic(*this),
 	loop(logic),
-	xfer_libraries(*this, &GdbStub::XferReadLibraries) {
+	xfer_libraries(*this, &GdbStub::XferReadLibraries),
+	xfer_memory_map(*this, &GdbStub::XferReadMemoryMap) {
 	AddGettableQuery(Query(*this, "Supported", &GdbStub::QueryGetSupported, false));
 	AddGettableQuery(Query(*this, "C", &GdbStub::QueryGetCurrentThread, false));
 	AddGettableQuery(Query(*this, "fThreadInfo", &GdbStub::QueryGetFThreadInfo, false));
@@ -52,6 +53,7 @@ GdbStub::GdbStub(ITwibDeviceInterface &itdi) :
 	AddMultiletterHandler("Cont?", &GdbStub::HandleVContQuery);
 	AddMultiletterHandler("Cont", &GdbStub::HandleVCont);
 	AddXferObject("libraries", xfer_libraries);
+	AddXferObject("memory-map", xfer_memory_map);
 	InitBreakpointRegs();
 }
 
@@ -828,6 +830,10 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 		proc.running = true;
 	}
 	waiting_for_stop = true;
+
+	xfer_libraries.InvalidateCache();
+	xfer_memory_map.InvalidateCache();
+
 	LogMessage(Debug, "reached end of vCont");
 }
 
@@ -1341,6 +1347,50 @@ std::string GdbStub::Process::BuildLibraryList() {
 	return ss.str();
 }
 
+std::string GdbStub::Process::BuildMemoryMap() {
+	LogMessage(Info, "BuildMemoryMap");
+	std::stringstream ss;
+	ss << "<memory-map>" << std::endl;
+
+	// Group memory into chunks having the same writability, even if other
+	// attributes (that we don't report) are different.
+	// This reduces the number of memory regions we have to report (which is
+	// already rather high).
+
+	struct Chunk {
+		bool writable;
+		uint64_t start_addr;
+		uint64_t end_addr;
+	};
+	std::optional<Chunk> chunk;
+	auto flush = [&]() {
+		ss << "<memory "
+			"type=\"" << (chunk->writable ? "ram" : "rom") << "\" "
+			"start=\"0x" << std::hex << chunk->start_addr << "\" "
+			"length=\"0x" << std::hex << (chunk->end_addr - chunk->start_addr) << "\" "
+			"/>" << std::endl;
+		chunk = std::nullopt;
+	};
+	for(nx::MemoryInfo mi : debugger.QueryAllMemory()) {
+		bool writable = mi.permission & 2;
+		if(chunk &&
+		   (mi.base_addr > chunk->end_addr ||
+		    writable != chunk->writable)) {
+			flush();
+		}
+		if(!chunk) {
+			chunk = Chunk{writable, mi.base_addr, 0};
+		}
+		chunk->end_addr = mi.base_addr + mi.size;
+	}
+	if(chunk) {
+		flush();
+	}
+
+	ss << "</memory-map>" << std::endl;
+	return ss.str();
+}
+
 GdbStub::Thread::Thread(Process &process, uint64_t thread_id, uint64_t tls_addr) : process(process), thread_id(thread_id), tls_addr(tls_addr) {
 }
 
@@ -1450,14 +1500,22 @@ bool GdbStub::XferObject::AdvertiseWrite() {
 GdbStub::ReadOnlyStringXferObject::ReadOnlyStringXferObject(GdbStub &stub, std::string (GdbStub::*generator)()) : stub(stub), generator(generator) {
 }
 
+
+void GdbStub::ReadOnlyStringXferObject::InvalidateCache() {
+	cache = std::nullopt;
+}
+
 void GdbStub::ReadOnlyStringXferObject::Read(std::string annex, size_t offset, size_t length) {
 	if(!annex.empty()) {
 		stub.connection.RespondError(0);
 		return;
 	}
 
-	std::string string = std::invoke(generator, stub);
-	
+	if(!cache) {
+		cache = std::invoke(generator, stub);
+	}
+	std::string &string = *cache;
+
 	util::Buffer response;
 	if(offset + length >= string.size()) {
 		response.Write('l');
@@ -1482,6 +1540,14 @@ std::string GdbStub::XferReadLibraries() {
 		return "<library-list></library-list>";
 	} else {
 		return current_thread->process.BuildLibraryList();
+	}
+}
+
+std::string GdbStub::XferReadMemoryMap() {
+	if(current_thread == nullptr) {
+		return "<memory-map></memory-map>";
+	} else {
+		return current_thread->process.BuildMemoryMap();
 	}
 }
 

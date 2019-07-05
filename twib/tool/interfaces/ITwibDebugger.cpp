@@ -44,6 +44,14 @@ std::tuple<nx::MemoryInfo, nx::PageInfo> ITwibDebugger::QueryMemory(uint64_t add
 	return std::make_tuple(mi, pi);
 }
 
+std::vector<nx::MemoryInfo> ITwibDebugger::QueryAllMemory() {
+	std::vector<nx::MemoryInfo> mis;
+	obj->SendSmartSyncRequest(
+		CommandID::QUERY_ALL_MEMORY,
+		out<std::vector<nx::MemoryInfo>>(mis));
+	return mis;
+}
+
 std::vector<uint8_t> ITwibDebugger::ReadMemory(uint64_t addr, uint64_t size) {
 	std::vector<uint8_t> bytes;
 	obj->SendSmartSyncRequest(
