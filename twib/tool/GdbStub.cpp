@@ -568,12 +568,14 @@ void GdbStub::InstallBreakpoint(HWBreakpoint &bw) {
 		throw std::runtime_error("InstallBreakpoint: invalid breakpoint");
 	}
 	if(bw.type != HWBreakpoint::Type::ContextID) {
+		LogMessage(Debug, "SetHardwareBreakPoint(%x, %x, %lx)", bw.id, bw.cr, bw.vr);
 		itdi.SetHardwareBreakPoint(bw.id, bw.cr, bw.vr);
 	} else {
 		auto p = attached_processes.find(bw.pid);
 		if (p == attached_processes.end()) {
 			throw std::runtime_error("InstallBreakpoint: no such pid");
 		}
+		LogMessage(Debug, "SetHardwareBreakPointContextIDR(%x, %x, pid=%lx)", bw.id, bw.cr, bw.pid);
 		p->second.debugger.SetHardwareBreakPointContextIDR(bw.id, bw.cr);
 	}
 }
@@ -586,7 +588,7 @@ bool GdbStub::HWBreakpoint::ValidateAndComputeRegs() {
 		return true;
 
 	case Type::Break: {
-		if(size != 4 || (address & 3) || linked_contextid_bp_id < 4) {
+		if(size != 4 || (address & 3) || linked_contextid_bp_id < 0) {
 			return false;
 		}
 		vr = address;
@@ -623,11 +625,15 @@ bool GdbStub::HWBreakpoint::ValidateAndComputeRegs() {
 			}
 			cr = mask << 24;
 		}
+		if(linked_contextid_bp_id < 0) {
+			return false;
+		}
+		uint32_t lbn = (uint32_t)linked_contextid_bp_id;
 		uint32_t lsc =
 			(type != Type::WatchW ? 1 : 0) | // load
 			(type != Type::WatchR ? 2 : 0); // store
 		uint32_t e = 1; // enabled
-		cr |= lsc << 3 | e << 0;
+		cr |= lbn << 16 | lsc << 3 | e << 0;
 		return true;
 	}
 
