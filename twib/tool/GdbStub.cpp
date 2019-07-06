@@ -1133,7 +1133,7 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 	bool stopped = false;
 	
 	while(!stopped && (event = debugger.GetDebugEvent())) {
-		LogMessage(Debug, "got event: %d", event->event_type);
+		LogMessage(Debug, "got event: %d thread_id: %llx", event->event_type, event->thread_id);
 
 		running = false;
 		
@@ -1255,6 +1255,13 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 				stop_reason.Write('.');
 				GdbConnection::Encode(thread_id, 0, stop_reason);
 				stop_reason.Write(';');
+
+				auto i = threads.find(thread_id);
+				if(i != threads.end()) {
+					stub.current_thread = &i->second;
+				} else {
+					stub.current_thread = nullptr;
+				}
 			}
 			if(watchpoint_hit_addr) {
 				stop_reason.Write("watch:");
