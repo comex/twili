@@ -55,7 +55,6 @@ class ITwibDeviceInterface {
 	enum class Command : uint32_t {
 		CREATE_MONITORED_PROCESS = 10,
 		REBOOT = 11,
-		COREDUMP = 12,
 		TERMINATE = 13,
 		LIST_PROCESSES = 14,
 		UPGRADE_TWILI = 15,
@@ -70,6 +69,7 @@ class ITwibDeviceInterface {
 		WAIT_TO_DEBUG_APPLICATION = 24,
 		WAIT_TO_DEBUG_TITLE = 25,
 		SET_HARDWARE_BREAK_POINT = 26,
+		OPEN_COREDUMP = 28,
 	};
 };
 
@@ -85,6 +85,13 @@ class ITwibPipeWriter {
 	enum class Command : uint32_t {
 		WRITE = 10,
 		CLOSE = 11,
+	};
+};
+
+class ITwibCoreDumpReader {
+ public:
+	enum class Command : uint32_t {
+		READ = 10,
 	};
 };
 

@@ -41,7 +41,7 @@ class ITwibDeviceInterface : public ObjectDispatcherProxy<ITwibDeviceInterface> 
 	
 	void CreateMonitoredProcess(bridge::ResponseOpener opener, std::string type);
 	void Reboot(bridge::ResponseOpener opener);
-	void CoreDump(bridge::ResponseOpener opener, uint64_t pid);
+	void OpenCoreDump(bridge::ResponseOpener opener, uint64_t pid);
 	void Terminate(bridge::ResponseOpener opener, uint64_t pid);
 	void ListProcesses(bridge::ResponseOpener opener);
 	void UpgradeTwili(bridge::ResponseOpener opener);
@@ -62,7 +62,7 @@ class ITwibDeviceInterface : public ObjectDispatcherProxy<ITwibDeviceInterface> 
 		ITwibDeviceInterface,
 		SmartCommand<CommandID::CREATE_MONITORED_PROCESS, &ITwibDeviceInterface::CreateMonitoredProcess>,
 		SmartCommand<CommandID::REBOOT, &ITwibDeviceInterface::Reboot>,
-		SmartCommand<CommandID::COREDUMP, &ITwibDeviceInterface::CoreDump>,
+		SmartCommand<CommandID::OPEN_COREDUMP, &ITwibDeviceInterface::OpenCoreDump>,
 		SmartCommand<CommandID::TERMINATE, &ITwibDeviceInterface::Terminate>,
 		SmartCommand<CommandID::LIST_PROCESSES, &ITwibDeviceInterface::ListProcesses>,
 		SmartCommand<CommandID::UPGRADE_TWILI, &ITwibDeviceInterface::UpgradeTwili>,

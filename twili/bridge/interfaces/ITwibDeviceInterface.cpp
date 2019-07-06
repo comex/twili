@@ -39,6 +39,7 @@
 #include "../../process/UnmonitoredProcess.hpp"
 #include "../../ELFCrashReport.hpp"
 
+#include "ITwibCoreDumpReader.hpp"
 #include "ITwibPipeReader.hpp"
 #include "ITwibDebugger.hpp"
 #include "ITwibProcessMonitor.hpp"
@@ -73,10 +74,10 @@ void ITwibDeviceInterface::Reboot(bridge::ResponseOpener opener) {
 	ResultCode::AssertOk(bpc_reboot_system());
 }
 
-void ITwibDeviceInterface::CoreDump(bridge::ResponseOpener opener, uint64_t pid) {
+void ITwibDeviceInterface::OpenCoreDump(bridge::ResponseOpener opener, uint64_t pid) {
 	std::shared_ptr<process::Process> proc = twili.FindProcess(pid);
-	ELFCrashReport report;
-	report.Generate(*proc, opener);
+	auto report = std::make_unique<ELFCrashReport>(*proc);
+	opener.RespondOk(opener.MakeObject<ITwibCoreDumpReader>(std::move(report)));
 }
 
 void ITwibDeviceInterface::Terminate(bridge::ResponseOpener opener, uint64_t pid) {

@@ -32,7 +32,12 @@ using trn::ResultCode;
 
 namespace twili {
 
-ELFCrashReport::ELFCrashReport() {
+ELFCrashReport::ELFCrashReport(process::Process &process)
+	: process(process),
+	debug(ResultCode::AssertOk(
+		trn::svc::DebugActiveProcess(process.GetPid()))) {
+	printf("  opened debug: 0x%x\n", debug.handle);
+	Prepare();
 }
 
 void ELFCrashReport::AddVMA(uint64_t virtual_addr, uint64_t size, uint32_t flags) {
@@ -60,12 +65,8 @@ ELFCrashReport::Thread *ELFCrashReport::GetThread(uint64_t thread_id) {
 	return &threads.find(thread_id)->second;
 }
 
-void ELFCrashReport::Generate(process::Process &process, twili::bridge::ResponseOpener ro) {
+void ELFCrashReport::Prepare() {
 	process.AddNotes(*this);
-	
-	trn::KDebug debug = ResultCode::AssertOk(
-		trn::svc::DebugActiveProcess(process.GetPid()));
-	printf("  opened debug: 0x%x\n", debug.handle);
 
 	while(1) {
 		auto r = trn::svc::GetDebugEvent(debug);
@@ -223,15 +224,15 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 	for(auto i = threads.begin(); i != threads.end(); i++) {
 		AddNote<ELF::Note::elf_prstatus>("CORE", ELF::NT_PRSTATUS, i->second.GeneratePRSTATUS(debug));
 	}
-	
+
 	size_t total_size = 0;
 	total_size+= sizeof(ELF::Elf64_Ehdr);
 	for(auto i = vmas.begin(); i != vmas.end(); i++) {
 		i->file_offset = total_size;
 		total_size+= i->size;
 	}
-	
-	size_t notes_offset = total_size;
+
+	notes_offset = total_size;
 	for(auto i = notes.begin(); i != notes.end(); i++) {
 		total_size+=
 			4 + // namesz
@@ -240,12 +241,33 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 			i->name.size() +
 			i->desc.size();
 	}
-	
-	size_t ph_offset = total_size;
-	total_size+= sizeof(ELF::Elf64_Phdr) * (1 + vmas.size());
 
-	bridge::ResponseWriter r = ro.BeginOk(sizeof(uint64_t) + total_size);
-	r.Write<uint64_t>(total_size);
+	ph_offset = total_size;
+	state = State::TransferEhdr;
+	printf("======>\n");
+}
+
+void ELFCrashReport::Transfer(twili::bridge::ResponseOpener ro) {
+	switch(state) {
+	case State::TransferEhdr:
+		TransferEhdr(std::move(ro));
+		break;
+	case State::TransferVMAs:
+		TransferVMAs(std::move(ro));
+		break;
+	case State::TransferNotesAndHeaders:
+		TransferNotesAndHeaders(std::move(ro));
+		break;
+	case State::Done:
+		throw trn::ResultError(TWILI_ERR_EOF);
+	}
+}
+
+void ELFCrashReport::TransferEhdr(twili::bridge::ResponseOpener ro) {
+	bridge::ResponseWriter r = ro.BeginOk(sizeof(uint64_t) + sizeof(ELF::Elf64_Ehdr) + sizeof(uint8_t));
+	printf("transferring ehdr\n");
+
+	r.Write<uint64_t>(sizeof(ELF::Elf64_Ehdr));
 	r.Write<ELF::Elf64_Ehdr>({
 			.e_ident = {
 				.ei_class = ELF::ELFCLASS64,
@@ -264,27 +286,62 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 			.e_shnum = 0,
 			.e_shstrndx = 0,
 		});
+	r.Write<uint8_t>(0); // done flag
+	r.Finalize();
+	printf("done transferring ehdr\n");
 
-	// write VMAs
+	vma_idx = 0;
+	offset_in_vma = 0;
+	state = State::TransferVMAs;
+}
+
+void ELFCrashReport::TransferVMAs(twili::bridge::ResponseOpener ro) {
+	size_t chunk_size = 1048576;
+	size_t amount_to_send = 0;
+	size_t tmp_offset_in_vma = offset_in_vma;
+	for(size_t tmp_vma_idx = vma_idx; tmp_vma_idx < vmas.size() && amount_to_send < chunk_size; tmp_vma_idx++) {
+		amount_to_send += std::min(vmas[tmp_vma_idx].size - tmp_offset_in_vma, chunk_size - amount_to_send);
+		tmp_offset_in_vma = 0;
+
+		printf("amount_to_send <- %lu\n", amount_to_send);
+	}
+	bridge::ResponseWriter r = ro.BeginOk(sizeof(uint64_t) + amount_to_send + sizeof(uint8_t));
+	r.Write<uint64_t>(amount_to_send);
 	std::vector<uint8_t> transfer_buffer(r.GetMaxTransferSize(), 0);
-	size_t vma_idx = 0;
-	for(auto i = vmas.begin(); i != vmas.end(); i++, vma_idx++) {
-		printf("  transferring VMA %lu/%lu @ 0x%lx size: 0x%lu\n",
-			vma_idx, vmas.size(),
-			i->virtual_addr, i->size);
-		for(size_t offset = 0; offset < i->size; offset+= transfer_buffer.size()) {
-			size_t size = transfer_buffer.size();
-			if(size > i->size - offset) {
-				size = i->size - offset;
-			}
-			ResultCode::AssertOk(trn::svc::ReadDebugProcessMemory(transfer_buffer.data(), debug, i->virtual_addr + offset, size));
+	size_t amount_sent = 0;
+	for(; vma_idx < vmas.size() && amount_sent < amount_to_send;) {
+		VMA &vma = vmas[vma_idx];
+		if(offset_in_vma == 0) {
+			printf("  transferring VMA %lu/%lu @ 0x%lx size: %lu\n",
+				vma_idx, vmas.size(),
+				vma.virtual_addr, vma.size);
+		} else {
+			printf("     +0x%lx\n", offset_in_vma);
+		}
+		size_t end_offset = std::min(vma.size, offset_in_vma + (amount_to_send - amount_sent));
+		while(offset_in_vma < end_offset) {
+			size_t size = std::min(transfer_buffer.size(), end_offset - offset_in_vma);
+			ResultCode::AssertOk(trn::svc::ReadDebugProcessMemory(transfer_buffer.data(), debug, vma.virtual_addr + offset_in_vma, size));
 			r.Write(transfer_buffer.data(), size);
+			offset_in_vma += size;
+			amount_sent += size;
+		}
+		if(offset_in_vma == vma.size) {
+			vma_idx++;
+			offset_in_vma = 0;
 		}
 	}
 
-	printf("  finished transferring VMAs\n");
+	r.Write<uint8_t>(0); // done flag
+	r.Finalize();
 
-	// write notes
+	if(vma_idx == vmas.size()) {
+		printf("  finished transferring VMAs\n");
+		state = State::TransferNotesAndHeaders;
+	}
+}
+
+void ELFCrashReport::TransferNotesAndHeaders(twili::bridge::ResponseOpener ro) {
 	std::vector<uint8_t> notes_bytes;
 	for(auto i = notes.begin(); i != notes.end(); i++) {
 		struct NoteHeader {
@@ -303,8 +360,7 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 		note.insert(note.end(), i->desc.begin(), i->desc.end());
 		notes_bytes.insert(notes_bytes.end(), note.begin(), note.end());
 	}
-	r.Write(notes_bytes);
-			
+
 	// write phdrs
 	std::vector<ELF::Elf64_Phdr> phdrs;
 	phdrs.push_back({
@@ -329,8 +385,16 @@ void ELFCrashReport::Generate(process::Process &process, twili::bridge::Response
 				.p_align = 0x1000
 			});
 	}
+	size_t amount_to_send = notes_bytes.size() + phdrs.size() * sizeof(ELF::Elf64_Phdr);
+	bridge::ResponseWriter r = ro.BeginOk(
+		sizeof(uint64_t) + amount_to_send + sizeof(uint8_t));
+	r.Write<uint64_t>(amount_to_send);
+	r.Write(notes_bytes);
 	r.Write(phdrs);
+	r.Write<uint8_t>(1); // done flag
 	r.Finalize();
+
+	state = State::Done;
 }
 
 ELFCrashReport::Thread::Thread(uint64_t thread_id, uint64_t tls_pointer, uint64_t entrypoint) :

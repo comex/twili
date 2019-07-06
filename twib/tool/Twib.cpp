@@ -429,17 +429,28 @@ int main(int argc, char *argv[]) {
 			LogMessage(Fatal, "could not open '%s': %s", core_file.c_str(), strerror(errno));
 			return 1;
 		}
-		std::vector<uint8_t> core = itdi.CoreDump(core_process_id);
-		size_t written = 0;
-		while(written < core.size()) {
-			ssize_t r = fwrite(core.data() + written, 1, core.size() - written, f);
-			if(r <= 0 || ferror(f)) {
-				LogMessage(Fatal, "write error on '%s'");
-			} else {
-				written+= r;
+		tool::ITwibCoreDumpReader core = itdi.OpenCoreDump(core_process_id);
+		while(1) {
+			std::vector<uint8_t> data;
+			bool done;
+
+			std::tie(data, done) = core.Read();
+
+			size_t written = 0;
+			while(written < data.size()) {
+				ssize_t r = fwrite(data.data() + written, 1, data.size() - written, f);
+				if(r <= 0 || ferror(f)) {
+					LogMessage(Fatal, "write error on '%s'");
+				} else {
+					written+= r;
+				}
+			}
+
+			if(done) {
+				fclose(f);
+				break;
 			}
 		}
-		fclose(f);
 	}
 	
 	if(terminate->parsed()) {

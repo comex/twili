@@ -46,13 +46,13 @@ void ITwibDeviceInterface::Reboot() {
 		CommandID::REBOOT);
 }
 
-std::vector<uint8_t> ITwibDeviceInterface::CoreDump(uint64_t process_id) {
-	std::vector<uint8_t> dump;
+ITwibCoreDumpReader ITwibDeviceInterface::OpenCoreDump(uint64_t process_id) {
+	std::optional<ITwibCoreDumpReader> reader;
 	obj->SendSmartSyncRequest(
-		CommandID::COREDUMP,
+		CommandID::OPEN_COREDUMP,
 		in<uint64_t>(process_id),
-		out<std::vector<uint8_t>>(dump));
-	return dump;
+		out_object(reader));
+	return *reader;
 }
 
 void ITwibDeviceInterface::Terminate(uint64_t process_id) {

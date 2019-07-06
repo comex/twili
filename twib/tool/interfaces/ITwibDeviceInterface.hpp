@@ -25,6 +25,7 @@
 #include<msgpack11.hpp>
 
 #include "../RemoteObject.hpp"
+#include "ITwibCoreDumpReader.hpp"
 #include "ITwibPipeWriter.hpp"
 #include "ITwibPipeReader.hpp"
 #include "ITwibProcessMonitor.hpp"
@@ -51,7 +52,7 @@ class ITwibDeviceInterface {
 	
 	ITwibProcessMonitor CreateMonitoredProcess(std::string type);
 	void Reboot();
-	std::vector<uint8_t> CoreDump(uint64_t process_id);
+	ITwibCoreDumpReader OpenCoreDump(uint64_t process_id);
 	void Terminate(uint64_t process_id);
 	std::vector<ProcessListEntry> ListProcesses();
 	msgpack11::MsgPack Identify();
