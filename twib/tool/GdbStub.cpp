@@ -1378,7 +1378,7 @@ std::string GdbStub::Process::BuildMemoryMap() {
 	std::optional<Chunk> chunk;
 	auto flush = [&]() {
 		ss << "<memory "
-			"type=\"" << (chunk->writable ? "ram" : "rom") << "\" "
+			"type=\"" << (chunk->writable ? "ram" : "ram") << "\" " // XXX
 			"start=\"0x" << std::hex << chunk->start_addr << "\" "
 			"length=\"0x" << std::hex << (chunk->end_addr - chunk->start_addr) << "\" "
 			"/>" << std::endl;
