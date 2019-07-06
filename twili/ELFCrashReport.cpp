@@ -302,8 +302,6 @@ void ELFCrashReport::TransferVMAs(twili::bridge::ResponseOpener ro) {
 	for(size_t tmp_vma_idx = vma_idx; tmp_vma_idx < vmas.size() && amount_to_send < chunk_size; tmp_vma_idx++) {
 		amount_to_send += std::min(vmas[tmp_vma_idx].size - tmp_offset_in_vma, chunk_size - amount_to_send);
 		tmp_offset_in_vma = 0;
-
-		printf("amount_to_send <- %lu\n", amount_to_send);
 	}
 	bridge::ResponseWriter r = ro.BeginOk(sizeof(uint64_t) + amount_to_send + sizeof(uint8_t));
 	r.Write<uint64_t>(amount_to_send);
@@ -315,8 +313,6 @@ void ELFCrashReport::TransferVMAs(twili::bridge::ResponseOpener ro) {
 			printf("  transferring VMA %lu/%lu @ 0x%lx size: %lu\n",
 				vma_idx, vmas.size(),
 				vma.virtual_addr, vma.size);
-		} else {
-			printf("     +0x%lx\n", offset_in_vma);
 		}
 		size_t end_offset = std::min(vma.size, offset_in_vma + (amount_to_send - amount_sent));
 		while(offset_in_vma < end_offset) {
