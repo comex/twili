@@ -94,7 +94,11 @@ class GdbStub {
 		ITwibDebugger debugger;
 		std::map<uint64_t, Thread> threads;
 		std::vector<ITwibDebugger::ThreadToContinue> running_thread_ids;
-		std::shared_ptr<std::atomic<bool>> has_events;
+		struct AsyncWaitState {
+			bool has_events = true;
+			std::mutex mutex;
+		};
+		std::shared_ptr<AsyncWaitState> async_wait_state;
 		bool running = false;
 	};
 
@@ -142,12 +146,17 @@ class GdbStub {
 	void AddXferObject(std::string name, XferObject &ob);
 	
 	std::string stop_reason = "W00";
-	bool waiting_for_stop = false;
-	bool has_async_wait = false;
+	enum class RunState {
+		Running,
+		WaitingForStop,
+		Stopped,
+	} run_state = RunState::Stopped;
+	int queued_interrupts = 0;
+
 	bool multiprocess_enabled = false;
 
-	void Stop();
-	
+	void RequestStop();
+
  private:
 	ITwibDeviceInterface &itdi;
 	GdbConnection connection;

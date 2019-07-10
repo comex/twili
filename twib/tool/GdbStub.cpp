@@ -112,11 +112,6 @@ void GdbStub::AddXferObject(std::string name, XferObject &object) {
 	}
 }
 
-void GdbStub::Stop() {
-	waiting_for_stop = false;
-	HandleGetStopReason(); // send reason
-}
-
 void GdbStub::ReadThreadId(util::Buffer &packet, int64_t &pid, int64_t &thread_id) {
 	pid = current_thread ? current_thread->process.pid : 0;
 	
@@ -802,6 +797,8 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 		}
 	}
 
+	run_state = RunState::Running;
+
 	for(auto p : process_actions) {
 		auto p_i = attached_processes.find(p.first);
 		if(p_i == attached_processes.end()) {
@@ -812,7 +809,7 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 		LogMessage(Debug, "ingesting process events before continue...");
 		if(proc.IngestEvents(*this)) {
 			LogMessage(Debug, "  stopped");
-			Stop();
+			RequestStop();
 			return;
 		}
 
@@ -835,7 +832,6 @@ void GdbStub::HandleVCont(util::Buffer &packet) {
 		proc.debugger.ContinueDebugEvent(7, proc.running_thread_ids);
 		proc.running = true;
 	}
-	waiting_for_stop = true;
 
 	xfer_libraries.InvalidateCache();
 	xfer_memory_map.InvalidateCache();
@@ -1127,6 +1123,11 @@ void GdbStub::QuerySetThreadEvents(util::Buffer &packet) {
 }
 
 bool GdbStub::Process::IngestEvents(GdbStub &stub) {
+	std::unique_lock<std::mutex> lock(async_wait_state->mutex);
+	if(!async_wait_state->has_events) {
+		return false;
+	}
+
 	std::optional<nx::DebugEvent> event;
 
 	bool was_running = running;
@@ -1292,28 +1293,27 @@ bool GdbStub::Process::IngestEvents(GdbStub &stub) {
 		LogMessage(Debug, "set stop reason: \"%s\"", stub.stop_reason.c_str());
 	}
 
-	if(!stub.has_async_wait) {
-		std::shared_ptr<std::atomic<bool>> has_events = this->has_events;
-		debugger.AsyncWait(
-			[has_events, &stub](uint32_t r) {
-				stub.has_async_wait = false;
-				if(r == 0) {
-					LogMessage(Debug, "process got event signal");
-					*has_events = true;
-					stub.loop.GetNotifier().Notify();
-				} else {
-					LogMessage(Error, "process got error signal");
-				}
-			});
-		stub.has_async_wait = true;
-	}
+	debugger.AsyncWait(
+		[&stub, async_wait_state=async_wait_state](uint32_t r) {
+			// TODO: ref stub
+			std::unique_lock<std::mutex> lock(async_wait_state->mutex);
+			if(r == 0) {
+				LogMessage(Debug, "process got event signal");
+				async_wait_state->has_events = true;
+				stub.loop.GetNotifier().Notify();
+			} else {
+				LogMessage(Error, "process got error signal");
+				async_wait_state->has_events = true;
+			}
+		});
+	async_wait_state->has_events = false;
 
 	if(was_running && !running && !stopped) { // if we're not running but we should be...
 		LogMessage(Debug, "got debug events but didn't stop, so continuing...");
 		debugger.ContinueDebugEvent(7, running_thread_ids);
 		running = true;
 	}
-	
+
 	return stopped;
 }
 
@@ -1416,25 +1416,77 @@ void GdbStub::Thread::SetRegisters(std::vector<uint64_t> registers) {
 }
 
 GdbStub::Process::Process(uint64_t pid, ITwibDebugger debugger) : pid(pid), debugger(debugger) {
-	has_events = std::make_shared<std::atomic<bool>>(false);
+	async_wait_state = std::make_shared<AsyncWaitState>();
 }
 
 GdbStub::Logic::Logic(GdbStub &stub) : stub(stub) {
 }
 
 void GdbStub::Logic::Prepare(platform::EventLoop &loop) {
+	LogMessage(Debug, "Logic::Prepare");
 	loop.Clear();
-	util::Buffer *buffer;
-	bool interrupted;
-	while((buffer = stub.connection.Process(interrupted)) != nullptr) {
+	if(stub.run_state != RunState::Stopped) {
+		for(auto &p : stub.attached_processes) {
+			if(p.second.IngestEvents(stub)) {
+				LogMessage(Debug, "stopping due to received event");
+				stub.RequestStop();
+				break;
+			}
+		}
+	}
+	while(1) {
+		if(stub.run_state == RunState::Running && stub.queued_interrupts) {
+			// "Interrupts received while the program is stopped are queued and the
+			// program will be interrupted when it is resumed next time."
+			// https://sourceware.org/gdb/onlinedocs/gdb/Interrupts.html
+			stub.RequestStop();
+			stub.queued_interrupts--;
+			continue;
+		}
+
+		if(stub.run_state == RunState::WaitingForStop) {
+			LogMessage(Debug, "Logic::Prepare checking for stopped processes");
+			for(auto &p : stub.attached_processes) {
+				if(p.second.running) {
+					// We sent BreakProcess but haven't gotten the corresponding
+					// event(s) yet.  Once we have, we will get notified; wait
+					// until then (with the loop still cleared).
+					LogMessage(Debug, "Logic::Prepare returning early");
+					return;
+				}
+			}
+			LogMessage(Debug, "Logic::Prepare actually stopping");
+			// All processes have stopped.
+			stub.run_state = RunState::Stopped;
+			stub.HandleGetStopReason(); // send reason
+			// TODO: this can drop events if multiple processes stop at the same time
+		}
+
+		// If we get here, we're either running or fully stopped.
+		bool interrupted;
+		util::Buffer *buffer = stub.connection.Process(interrupted);
+		if(interrupted) {
+			stub.queued_interrupts++;
+			continue;
+		}
+
+		if(!buffer) {
+			break;
+		}
+
 		LogMessage(Debug, "got message (0x%lx bytes)", buffer->ReadAvailable());
 		char ident;
 		if(!buffer->Read(ident)) {
-			LogMessage(Debug, "invalid packet (zero-length?)");
+			LogMessage(Error, "invalid packet (zero-length?)");
 			stub.connection.SignalError();
 			return;
 		}
 		LogMessage(Debug, "got packet, ident: %c", ident);
+		if(stub.run_state != RunState::Stopped) {
+			LogMessage(Error, "unexpectedly received message while not stopped; dropping!");
+			continue;
+		}
+
 		switch(ident) {
 		case '!': // extended mode
 			stub.connection.RespondOk();
@@ -1484,22 +1536,19 @@ void GdbStub::Logic::Prepare(platform::EventLoop &loop) {
 			break;
 		}
 	}
+	LogMessage(Debug, "Logic::Prepare returning normally");
+	loop.AddMember(stub.connection.in_member);
+}
 
-	if(interrupted || stub.waiting_for_stop) {
-		for(auto &p : stub.attached_processes) {
-			if(interrupted && p.second.running) {
+void GdbStub::RequestStop() {
+	if(run_state == RunState::Running) {
+		run_state = RunState::WaitingForStop;
+		for(auto &p : attached_processes) {
+			if(p.second.running) {
 				p.second.debugger.BreakProcess();
-			}
-			if(stub.waiting_for_stop && *p.second.has_events) {
-				if(p.second.IngestEvents(stub)) {
-					LogMessage(Debug, "stopping due to received event");
-					stub.Stop();
-				}
 			}
 		}
 	}
-	
-	loop.AddMember(stub.connection.in_member);
 }
 
 bool GdbStub::XferObject::AdvertiseRead() {
