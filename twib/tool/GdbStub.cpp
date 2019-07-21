@@ -246,7 +246,8 @@ void GdbStub::HandleReadGeneralRegisters() {
 	try {
 		util::Buffer response;
 		std::vector<uint64_t> registers = current_thread->GetRegisters();
-		GdbConnection::Encode((uint8_t*) registers.data(), 284, response);
+		GdbConnection::Encode((uint8_t*) registers.data(), 268, response);
+		GdbConnection::Encode((uint8_t*) registers.data() + 272, 520, response);
 		std::string str;
 		size_t sz = response.ReadAvailable();
 		response.Read(str, sz);
@@ -268,8 +269,9 @@ void GdbStub::HandleWriteGeneralRegisters(util::Buffer &packet) {
 	std::vector<uint8_t> registers_binary;
 	GdbConnection::Decode(registers_binary, packet);
 
-	std::vector<uint64_t> registers(36);
-	memcpy(registers.data(), registers_binary.data(), 284);
+	std::vector<uint64_t> registers(99);
+	memcpy(registers.data(), registers_binary.data(), 268);
+	memcpy(registers.data() + 272/8, registers_binary.data() + 268, 520);
 	
 	try {
 		current_thread->SetRegisters(registers);

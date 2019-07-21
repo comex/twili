@@ -102,7 +102,7 @@ void ITwibDebugger::SetThreadContext(uint64_t thread_id, std::vector<uint64_t> r
 	obj->SendSmartSyncRequest(
 		CommandID::SET_THREAD_CONTEXT,
 		in<uint64_t>(thread_id),
-		in<uint32_t>(3), // gprs + pc + sp + cpsr
+		in<uint32_t>(15), // gprs + pc + sp + cpsr + fpu + fpcr/fpsr
 		in<ThreadContext>(tc));
 }
 
